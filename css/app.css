@@ -1,0 +1,22 @@
+#webgl_board_container {
+    border: 1px solid rgb(158, 158, 158);
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 1;
+}
+#blocks_container {
+    width: 100%;
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 2;
+}
+#blocks_workspace {
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+.blocklySvg {
+    background-color: transparent !important;
+}
