@@ -5,7 +5,7 @@ function is_array(potential_array) {
 class Interpreter {
     constructor(code, init_func) {
         this.syntax_tree = Parser.parse(code);
-        this._paused = false;
+        this.paused = false;
         this.UNDEFINED = this.create_primitive(undefined);
         this._init_function = init_func;
         let scope = this.create_scope();
@@ -19,18 +19,22 @@ class Interpreter {
     step() {
         if (!is_array(this.state_stack))
             return false;
-        else if (this._paused)
+        else if (this.paused)
             return true;
         let state = this.state_stack[0];
-        this['step_' + state.node.type]();
+        if (this['step_' + state.node.type]) {
+            this['step_' + state.node.type]();
+        } else {
+            throw new Error('No such step: ' + state.node.type);
+        }
         return true;
     }
 
     run() {
-        while (!this._paused) {
+        while (!this.paused) {
             if (!this.step()) break;
         }
-        return this._paused;
+        return this.paused;
     }
 
     init_global_scope(scope) {
@@ -259,7 +263,7 @@ class Interpreter {
         // constructor
         wrapper = function(value) {
             value = value ? value.toBoolean() : false;
-            if (this.parent == self.STRING) {
+            if (this.parent == self.BOOLEAN) {
                 this.toBoolean = function() {
                     return value;
                 };
@@ -682,7 +686,7 @@ class Interpreter {
         return this.is_instance_of(child.parent.prototype, parent);
     }
 
-    comp(a, b) {
+    comp(a, b, comp_func) {
         if (a.is_primitive && a.type == 'number' && isNaN(a.data) || b.is_primitive && b.type == 'number' && isNaN(b.data)) {
             return NaN;
         }
@@ -690,6 +694,10 @@ class Interpreter {
             a = a.data;
             b = b.data;
         } else {
+            if (comp_func) {
+                let result = comp_func(a.data, b.data);
+                return isNaN(result) ? NaN : result;
+            }
             return NaN;
         }
         if (a < b) {
@@ -765,5 +773,821 @@ class Interpreter {
         return false;
     }
 
-    
+    set_property(obj, prop_name, value, fixed, nonenumerable) {
+        if (obj.is_primitive) {
+            throw new TypeError('Primitive has no properties.');
+        }
+        prop_name = prop_name.toString();
+        if (obj.fixed[prop_name]) {
+            return;
+        }
+
+        if (this.is_instance_of(obj, this.STRING)) {
+            let n = this.array_index(prop_name);
+            if (prop_name == 'length' || (!isNaN(n) && n < obj.data.length)) {
+                return;
+            }
+        }
+        if (this.is_instance_of(obj, this.ARRAY)) {
+            if (prop_name == 'length') {
+                let new_length = this.array_index(value.toNumber());
+                if (isNaN(new_length)) {
+                    throw new TypeError('Invalid array length.');
+                }
+                if (new_length < obj.length) {
+                    for (let i in obj.properties) {
+                        let j = this.array_index(i);
+                        if (!isNaN(j) && new_length <= j) {
+                            delete obj.properties[j];
+                        }
+                    }
+                }
+                obj.length = new_length;
+                return;
+            } else {
+                let i = this.array_index(prop_name);
+                if (!isNaN(i)) {
+                    obj.length = Math.max(obj.length, i + 1);
+                }
+            }
+        }
+        obj.properties[prop_name] = value;
+        if (fixed) {
+            obj.fixed[prop_name] = true;
+        }
+        if (nonenumerable) {
+            obj.nonenumerable[prop_name] = true;
+        }
+    }
+
+    delete_property(obj, prop_name) {
+        if (obj.is_primitive) {
+            throw new TypeError('Primitive has no properties.');
+        }
+        prop_name = prop_name.toString();
+        if (obj.fixed[prop_name]) {
+            return false;
+        }
+        if (prop_name == 'length' && this.is_instance_of(obj, this.ARRAY)) {
+            return false;
+        }
+        return delete obj.properties[prop_name];
+    }
+
+    get_scope() {
+        for (let i = 0; i < this.state_stack.length; i++) {
+            if (this.state_stack[i].scope) {
+                return this.state_stack[i].scope;
+            }
+        }
+        throw new Error('No scope found.');
+    }
+
+    create_scope(node, parent_scope) {
+        let scope = this.create_object(null);
+        scope.parent_scope = parent_scope;
+        if (!parent_scope) {
+            this.init_global_scope();
+        }
+        this.populate_scope(node, scope);
+        scope.strict = false;
+        if (parent_scope && parent_scope.strict) {
+            scope.strict = true;
+        } else {
+            let first_node = node.body && node.body[0];
+            if (first_node && first_node.expression) {
+                if (first_node.expression.type == 'Literal' && first_node.expression.value == 'use strict') {
+                    scope.strict = true;
+                }
+            }
+        }
+        return scope;
+    }
+
+    get_scope_value(name, value) {
+        let scope = this.get_scope();
+        name = name.toString();
+        while (scope) {
+            if (this.has_property(scope, name)) {
+                return this.set_property(scope, name, value);
+            }
+            scope = scope.parent_scope;
+        }
+        throw new Error('Unknown identifier: ' + name);
+    }
+
+    set_scope_value(name, value) {
+        let scope = this.get_scope();
+        let strict = scope.strict;
+        name = name.toString();
+        while (scope) {
+            if (this.has_property(scope, name) || (!strict && !scope.parent_scope)) {
+                return this.set_property(scope, name, value);
+            }
+            scope = scope.parent_scope;
+        }
+        throw new Error('Unknown identifier: ' + name);
+    }
+
+    populate_scope(node, scope) {
+        if (node.type == 'VariableDeclaration') {
+            for (let i = 0; node.declarations.length; i++) {
+                this.set_property(scope, node.declarations[i].id.name, this.UNDEFINED);
+            }
+        } else if (node.type == 'FunctionDeclaration') {
+            this.set_property(scope, node.id.name, this.create_function(node, scope));
+            return;
+        } else if (node.type == 'FunctionExpression') {
+            return;
+        }
+        let self = this;
+        for (let prop_name in node) {
+            let prop = node[prop_name];
+            if (prop && typeof prop == 'object') {
+                if (is_array(prop)) {
+                    for (let i = 0; i < prop.length; i++) {
+                        if (prop[i].constructor == this.syntax_tree.constructor) {
+                            this.populate_scope(prop[i], scope);
+                        }
+                    }
+                } else if (prop.constructor == this.syntax_tree.constructor) {
+                    this.populate_scope(scope, prop);
+                }
+            }
+        }
+    }
+
+    get_value(obj_or_scope) {
+        if (obj_or_scope.length) {
+            let obj = obj_or_scope[0];
+            let prop = obj_or_scope[1];
+            return this.get_property(obj, prop);
+        } else {
+            return this.get_scope_value(obj_or_scope);
+        }
+    }
+
+    set_value(obj_or_scope, value) {
+        if (obj_or_scope.length) {
+            let obj = obj_or_scope[0];
+            let prop = obj_or_scope[1];
+            return this.set_property(obj, prop, value);
+        } else {
+            return this.set_scope_value(obj_or_scope, value);
+        }
+    }
+
+    // node types
+    step_ArrayExpression() {
+        let state = this.state_stack[0];
+        let node = state.node;
+        let n = state.n || 0;
+        if (!state.array) {
+            state.array = this.create_object(this.ARRAY);
+        } else {
+            this.set_property(state.array, n - 1, state.value);
+        }
+        if (node.elements[n]) {
+            state.n = n + 1;
+            this.state_stack.unshift({
+                node: node.elements[n]
+            });
+        } else {
+            state.array.length = state.n || 0;
+            this.state_stack.shift();
+            this.state_stack[0].value = state.array;
+        }
+    }
+
+    step_AssignmentExpression() {
+        let state = this.state_stack[0];
+        let node = state.node;
+        if (!state.done_left) {
+            state.done_left = true;
+            this.state_stack.unshift({
+                node: node.left,
+                components: true
+            });
+        } else if (!state.done_right) {
+            state.done_right = true;
+            state.left_side = state.value;
+            this.state_stack.unshift({
+                node: node.right
+            });
+        } else {
+            this.state_stack.shift();
+            let left_side = state.left_side;
+            let right_side = state.value;
+            let value;
+            if (node.operator == '=') {
+                value = right_side;
+            } else {
+                let left_value = this.get_value(left_side);
+                let right_value = right_side;
+                if (left_value.type == 'string' || right_value.type == 'string') {
+                    left_value = left_value.toString();
+                    right_value = right_value.toString();
+                } else {
+                    left_value = left_value.toNumber();
+                    right_value = right_value.toNumber();
+                }
+                if (node.operator == '+=') {
+                    value = left_value + right_value;
+                } else if (node.operator == '-=') {
+                    value = left_value - right_value;
+                } else if (node.operator == '*=') {
+                    value = left_value * right_value;
+                } else if (node.operator == '/=') {
+                    value = left_value / right_value;
+                } else if (node.operator == '%=') {
+                    value = left_value % right_value;
+                } else if (node.operator == '&=') {
+                    value = left_value & right_value;
+                } else if (node.operator == '|=') {
+                    value = left_value | right_value;
+                } else {
+                    throw new Error('Unknow assignment operator: ' + node.operator + ', (supporting only: =, +=, -=, /=, *=, %=, &=, |=)');
+                }
+                value = this.create_primitive(value);
+            }
+            this.set_value(left_side, value);
+            this.state_stack[0].value = value;
+        }
+    }
+
+    step_BinaryExpression() {
+        let state = this.state_stack[0];
+        let node = state.node;
+        if (!state.done_left) {
+            state.done_left = true;
+            this.state_stack.unshift({
+                node: node.left
+            });
+        } else if (!state.done_right) {
+            state.done_right = true;
+            state.left_side = state.value;
+            this.state_stack.unshift({
+                node: node.right
+            });
+        } else {
+            let left_side = state.left_side;
+            let right_side = state.value;
+            let comp_result = this.comp(left_side, right_side);
+            let value;
+            if (node.operator == '==') {
+                value = comp_result === 0;
+            } else if (node.operator == '!=') {
+                value = comp_result !== 0;
+            } else if (node.operator == '===') {
+                if (left_side.is_primitive && right_side.is_primitive) {
+                    value = left_side.data === right_side.data;
+                } else {
+                    value = left_side === right_side;
+                }
+            } else if (node.operator == '!==') {
+                if (left_side.is_primitive && right_side.is_primitive) {
+                    value = left_side.data !== right_side.data;
+                } else {
+                    value = left_side !== right_side;
+                }
+            } else if (node.operator == '>') {
+                value = comp_result == 1;
+            } else if (node.operator == '>=') {
+                value = comp_result == 1 || comp_result === 0;
+            } else if (node.operator == '<') {
+                value = comp_result == -1;
+            } else if (node.operator == '<=') {
+                value = comp_result == -1 || comp_result === 0;
+            } else if (node.operator == '+') {
+                let left_value;
+                let right_value;
+                if (left_side.type == 'string' || right_side.type == 'string') {
+                    left_value = left_side.toString();
+                    right_value = right_side.toString();
+                } else {
+                    left_value = left_side.toNumber();
+                    right_value = right_side.toNumber();
+                }
+                value = left_value + right_value;
+            } else if (node.operator == 'in') {
+                value = this.has_property(right_side, left_side);
+            } else {
+                let left_value = left_side.toNumber();
+                let right_value = right_side.toNumber();
+                if (node.operator == '-') {
+                    value = left_value - right_value;
+                } else if (node.operator == '*') {
+                    value = left_value * right_value;
+                } else if (node.operator == '/') {
+                    value = left_value / right_value;
+                } else if (node.operator == '%') {
+                    value = left_value % right_value;
+                } else if (node.operator == '&') {
+                    value = left_value & right_value;
+                } else if (node.operator == '|') {
+                    value = left_value | right_value;
+                } else {
+                    throw new Error('Unknown binary operator: ' + node.operator);
+                }
+            }
+            this.state_stack[0].value = this.create_primitive(value);
+        }
+    }
+
+    step_DoWhileStatement() {
+        let state = this.state_stack[0];
+        state.is_loop = true;
+        if (state.node.type == 'DoWhileStatement' && state.test === undefined) {
+            state.value = this.createPrimitive(true);
+            state.test = true;
+        }
+        if (!state.test) {
+            state.test = true;
+            this.state_stack.unshift({
+                node: state.node.test
+            });
+        } else {
+            state.test = false;
+            if (!state.value.toBoolean()) {
+                this.state_stack.shift();
+            } else if (state.node.body) {
+                this.state_stack.unshift({
+                    node: state.node.body
+                });
+            }
+        }
+    }
+
+    step_WhileStatement() {
+        this.step_DoWhileStatement();
+    }
+
+    step_ForStatement() {
+        let state = this.state_stack[0];
+        state.is_loop = true;
+        let node = state.node;
+        let mode = state.mode || 0;
+        switch (mode) {
+            case 0:
+                state.mode = 1;
+                if (node.init) {
+                    this.state_stack.unshift({
+                        node: node.init
+                    });
+                }
+                break;
+            case 1:
+                state.mode = 2;
+                if (node.test) {
+                    this.state_stack.unshift({
+                        node: node.test
+                    });
+                }
+                break;
+            case 2:
+                state.mode = 3;
+                if (state.value && !state.value.toBoolean()) {
+                    this.state_stack.shift();
+                } else if (node.body) {
+                    this.state_stack.unshift({
+                        node: node.body
+                    });
+                }
+                break;
+            case 3:
+                state.mode = 1;
+                if (node.update) {
+                    this.state_stack.unshift({
+                        node: node.update
+                    });
+                }
+                break;
+        }
+    }
+
+    step_ForInStatement() {
+        let state = this.state_stack[0];
+        state.is_loop = true;
+        let node = state.node;
+        if (!state.done_variable) {
+            state.done_variable = true;
+            let left = node.left;
+            if (left.type == 'VariableDeclaration') {
+                left = left.declarations[0].id;
+            }
+            this.state_stack.unshift({
+                node: left,
+                components: true
+            });
+        } else if (!state.done_object) {
+            state.done_object = true;
+            state.variable = state.value;
+            this.state_stack.unshift({
+                node: node.right
+            });
+        } else {
+            if (typeof state.iterator == 'undefined') {
+                state.object = state.value;
+                state.iterator = 0;
+            }
+            let name = null;
+            outer_loop:
+                do {
+                    let i = state.iterator;
+                    for (let prop in state.object.properties) {
+                        if (prop in state.object.nonenumerable) {
+                            continue;
+                        }
+                        if (i === 0) {
+                            name = prop;
+                            break outer_loop;
+                        }
+                        i--;
+                    }
+                    state.object = state.object.parent && state.object.parent.properties.prototype;
+                    state.iterator = 0;
+                } while (state.object);
+            state.iterator++;
+            if (name === null) {
+                this.state_stack.shift();
+            } else {
+                this.set_scope_value(state.variable, this.create_primitive(name));
+                if (node.body) {
+                    this.state_stack.unshift({
+                        node: node.body
+                    });
+                }
+            }
+        }
+    }
+
+    step_BreakStatement() {
+        let state = this.state_stack.shift();
+        let node = state.node;
+        let label = null;
+        if (node.label) {
+            label = node.label.name;
+        }
+        state = this.state_stack.shift();
+        while (state && state.node.type != 'CallExpression') {
+            if ((label && label == state.label) || (state.is_loop || state.is_switch)) {
+                return;
+            }
+            state = this.state_stack.shift();
+        }
+        throw new Error('Faulty break statement.');
+    }
+
+    step_ContinueStatemet() {
+        let node = this.state_stack[0].node;
+        let label = null;
+        if (node.label) {
+            label = node.label.name;
+        }
+        let state = this.state_stack[0];
+        while (state && state.node.type != 'CallExpression') {
+            if (state.isLoop) {
+                if (!label || (label == state.label)) {
+                    return;
+                }
+            }
+            this.state_stack.shift();
+            state = this.state_stack[0];
+        }
+        throw new Error('Faulty continue statement');
+    }
+
+    step_BlockStatement() {
+        let state = this.state_stack[0];
+        let node = state.node;
+        let n = state.n || 0;
+        if (node.body[n]) {
+            state.n = n + 1;
+            this.state_stack.unshift({
+                node: node.body[n]
+            });
+        } else {
+            this.state_stack.shift();
+        }
+    }
+
+    step_Program() {
+        this.step_BlockStatement();
+    }
+
+    step_CallExpression() {
+        let state = this.state_stack[0];
+        let node = state.node;
+        if (!state.done_call_expression) {
+            state.done_call_expression = true;
+            this.state_stack.unshift({
+                node: node.callee,
+                components: true
+            });
+        } else {
+            let n;
+            if (!state.func) {
+                if (state.value.type == 'function') {
+                    state.func = state.value;
+                } else {
+                    state.member = state.value[0];
+                    state.func = this.get_value(state.value);
+                    if (!state.func || state.func.type != 'function') {
+                        throw new TypeError(state.func + ' is not a function');
+                    }
+                }
+                if (state.node.type == 'NewExpression') {
+                    state.func_this = this.create_object(state.func);
+                    state.is_constructor = true;
+                } else if (state.value.length) {
+                    state.func_this = state.value[0];
+                } else {
+                    state.func_this = this.state_stack[this.state_stack.length - 1].this_expression;
+                }
+                state.arguments = [];
+                n = 0;
+            } else {
+                n = state.n;
+                if (state.arguments.length != node.arguments.length) {
+                    state.arguments[n - 1] = state.value;
+                }
+            }
+            if (node.arguments[n]) {
+                state.n = n + 1;
+                this.state_stack.unshift({
+                    node: node.arguments[n]
+                });
+            } else if (!state.done_exec) {
+                state.done_exec = true;
+                if (state.func.node && (state.func.node.type == 'function_apply' || state.func.node.type == 'function_call')) {
+                    state.func_this = state.arguments.shift();
+                    if (state.func.node.type == 'function_apply') {
+                        state.arguments = [];
+                        let args_list = state.arguments.shift();
+                        if (args_list && this.is_instance_of(args_list, this.ARRAY)) {
+                            for (let i = 0; i < args_list.length; i++) {
+                                state.arguments.push(this.get_property(args_list, i));
+                            }
+                        }
+                    }
+                    state.func = state.member;
+                }
+                if (state.func.node) {
+                    let scope = this.create_scope(state.func.node.body, state.func.parent_scope);
+                    for (let i = 0; i < state.func.node.params.length; i++) {
+                        let param_name = this.create_primitive(state.func.node.params[i].name);
+                        let param_val = i < state.arguments.length ? state.arguments[i] : this.UNDEFINED;
+                        this.set_property(scope, param_name, param_val);
+                    }
+                    let args_list = this.create_object(this.ARRAY);
+                    for (let i = 0; i < state.arguments.length; i++) {
+                        this.set_property(args_list, this.createPrimitive(i), state.arguments[i]);
+                    }
+                    this.set_property(scope, 'arguments', args_list);
+                    let func_state = {
+                        node: state.func.node.body,
+                        scope: scope,
+                        this_expression: state.func._this
+                    };
+                    this.state_stack.unshift(func_state);
+                    state.value = this.UNDEFINED;
+                } else if (state.func.native_func) {
+                    state.value = state.func.native_func.apply(state.func_this, state.arguments);
+                } else if (state.func.eval) {
+                    let code = state.arguments[0];
+                    if (!code) {
+                        state.value = this.UNDEFINED;
+                    } else if (!code.is_primitive) {
+                        state.value = code;
+                    } else {
+                        let eval_interpreter = new Interpreter(code.toString());
+                        eval_interpreter.state_stack[0].scope.parent_scope = this.get_scope();
+                        state = {
+                            node: {
+                                type: 'Eval',
+                            },
+                            interpreter: eval_interpreter
+                        };
+                        this.state_stack.unshift(state);
+                    }
+                } else {
+                    throw new Error('Problem with a function interpretation.');
+                }
+            } else {
+                this.state_stack.shift();
+                this.state_stack[0].value = state.is_constructor ? state.func_this : state.value;
+            }
+        }
+    }
+
+    step_NewExpression() {
+        this.step_CallExpression();
+    }
+
+    step_ReturnStatement() {
+        let state = this.state_stack[0];
+        let node = state.node;
+        if (node.argument && !state.done) {
+            state.done = true;
+            this.state_stack.unshift({
+                node: node.argument
+            });
+        } else {
+            let value = state.value || this.UNDEFINED;
+            do {
+                this.state_stack.shift();
+                if (this.state_stack.length === 0) {
+                    throw new SyntaxError('Illegal return statement');
+                }
+                state = this.state_stack[0];
+            } while (state.node.type != 'CallExpression');
+            state.value = value;
+        }
+    }
+
+    step_SequenceExpression() {
+        let state = this.state_stack[0];
+        let node = state.node;
+        let n = state.n || 0;
+        if (node.expressions[n]) {
+            state.n = n + 1;
+            this.state_stack.unshift({
+                node: node.expressions[n]
+            });
+        } else {
+            this.state_stack.shift();
+            this.state_stack[0].value = state.value;
+        }
+    }
+
+    step_ThisExpression() {
+        this.state_stack.shift();
+        for (var i = 0; i < this.state_stack.length; i++) {
+            if (this.state_stack[i].this_expression) {
+                this.state_stack[0].value = this.state_stack[i].this_expression;
+                return;
+            }
+        }
+        throw new Error('Couldn\'t find this');
+    }
+
+    step_ConditionalExpression() {
+        let state = this.state_stack[0];
+        if (!state.done) {
+            if (!state.test) {
+                state.test = true;
+                this.state_stack.unshift({
+                    node: state.node.test
+                });
+            } else {
+                state.done = true;
+                if (state.value.toBoolean() && state.node.consequent) {
+                    this.state_stack.unshift({
+                        node: state.node.consequent
+                    });
+                } else if (!state.value.toBoolean() && state.node.alternate) {
+                    this.state_stack.unshift({
+                        node: state.node.alternate
+                    });
+                }
+            }
+        } else {
+            this.state_stack.shift();
+            if (state.node.type == 'ConditionalExpression') {
+                this.state_stack[0].value = state.value;
+            }
+        }
+    }
+
+    step_IfStatement() {
+        this.step_ConditionalExpression();
+    }
+
+    step_EmptyStatement() {
+        this.state_stack.shift();
+    }
+
+    step_FunctionDeclaration() {
+        this.state_stack.shift();
+    }
+
+    step_FunctionExpression() {
+        let state = this.state_stack[0];
+        this.state_stack.shift();
+        this.state_stack[0].value = this.create_function(state.node);
+    }
+
+    step_Identifier() {
+        let state = this.state_stack[0];
+        this.state_stack.shift();
+        let name = this.create_primitive(state.node.name);
+        this.state_stack[0].value = state.components ? name : this.get_scope_value(name);
+    }
+
+    step_LabeledStatement() {
+        let state = this.state_stack.shift();
+        this.state_stack.unshift({
+            node: state.node.body,
+            label: state.node.label.name
+        });
+    }
+
+    step_Literal() {
+        let state = this.state_stack[0];
+        this.state_stack.shift();
+        this.state_stack[0].value = this.create_primitive(state.node.value);
+    }
+
+    step_LogicalExpression() {
+        let state = this.state_stack[0];
+        let node = state.node;
+        if (node.operator != '&&' && node.operator != '||') {
+            throw new Error('Unknown logical operator: ' + node.operator);
+        }
+        if (!state.done_left) {
+            state.done_left = true;
+            this.state_stack.unshift({
+                node: node.left
+            });
+        } else if (!state.done_right) {
+            if ((node.operator == '&&' && !state.value.toBoolean()) || (node.operator == '||' && state.value.toBoolean())) {
+                this.state_stack.shift();
+                this.state_stack[0].value = state.value;
+            } else {
+                state.done_right = true;
+                this.state_stack.unshift({
+                    node: node.right
+                });
+            }
+        } else {
+            this.state_stack.shift();
+            this.state_stack[0].value = state.value;
+        }
+    }
+
+    step_MemberExpression() {
+        let state = this.state_stack[0];
+        let node = state.node;
+        if (!state.done_object) {
+            state.done_object = true;
+            this.state_stack.unshift({
+                node: node.object
+            });
+        } else if (!state.done_prop) {
+            state.done_prop = true;
+            state.object = state.value;
+            this.state_stack.unshift({
+                node: node.property,
+                components: !node.computed
+            });
+        } else {
+            this.state_stack.shift();
+            if (state.components) {
+                this.state_stack[0].value = [state.object, state.value];
+            } else {
+                this.state_stack[0].value = this.get_property(state.object, state.value);
+            }
+        }
+    }
+
+    step_ObjectExpression() {
+        let state = this.state_stack[0];
+        let node = state.node;
+        let value_t = state.value_t;
+        let n = state.n || 0;
+        if (!state.object) {
+            state.object = this.create_object(this.OBJECT);
+        } else {
+            if (value_t) {
+                state.key = state.value;
+            } else {
+                this.set_property(state.object, state.key, state.value);
+            }
+        }
+        if (node.properties[n]) {
+            if (value_t) {
+                state.n = n + 1;
+                this.state_stack.unshift({
+                    node: node.properties[n].value
+                });
+            } else {
+                this.state_stack.unshift({
+                    node: node.properties[n].key,
+                    components: true
+                });
+            }
+            state.value_t = !value_t;
+        } else {
+            this.state_stack.shift();
+            this.state_stack[0].value = state.object;
+        }
+    }
+
+    step_Eval() {
+        let state = this.state_stack[0];
+        if (!state.interpreter.step()) {
+            this.state_stack.shift();
+            this.state_stack[0].value = state.interpreter.value || this.UNDEFINED;
+        }
+    }
 }
