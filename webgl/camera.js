@@ -1,116 +1,128 @@
-var MOUSE_SENSITIVITY = new THREE.Vector3(0.4, 0.8, 5.0);
-var PI_2 = 2 * Math.PI;
+const MOUSE_SENSITIVITY = new THREE.Vector3(0.5, 0.5, 10.0);
+const DEG_TO_RAD_2 = Math.PI / 360.0;
 
-function camera_init(camera, yaw, pitch, distance_from_robot, angle_around_robot, rad) {
-    camera_set_yaw(camera, yaw, rad);
-    camera_set_pitch(camera, pitch, rad);
-    camera_set_angle_around_robot(camera, angle_around_robot, rad);
-    camera.userData.distance_from_robot = distance_from_robot;
+let camera_user_data;
+
+function camera_init(camera, radius, theta, phi) {
+    camera_user_data = {};
+    camera_user_data.is_perspective = true;
+    camera_user_data.radius = radius;
+    camera_user_data.theta = theta;
+    camera_user_data.on_mousedown_theta = theta;
+    camera_user_data.phi = phi;
+    camera_user_data.on_mousedown_phi = phi;
+    camera_user_data.on_mousedown_x = 0;
+    camera_user_data.on_mousedown_y = 0;
+    camera_user_data.aspect = 16.0 / 9.0;
+    camera_user_data.left =  -200;
+	camera_user_data.right = 200;
+	camera_user_data.top = 200;
+	camera_user_data.bottom = -200;
+    camera_set_position(camera);
+    camera.lookAt(new THREE.Vector3(0, 0, 0));
     camera.updateMatrix();
 }
 
-function camera_calculate_pitch(camera, mouseinfo) {
-    if (mouseinfo.right_button_pressed) {
-		var pitch_change = mouseinfo.delta_position.y * MOUSE_SENSITIVITY.x;
-		camera_increase_pitch(camera, THREE.Math.degToRad(-pitch_change), true);
-	}
-}
-
-function camera_calculate_angle_around_robot(camera, mouseinfo) {
-    if (mouseinfo.left_button_pressed) {
-        var angle_change = mouseinfo.delta_position.x * MOUSE_SENSITIVITY.y;
-        camera_increase_angle_around_robot(camera, THREE.Math.degToRad(-angle_change), true);
+function camera_set_position(camera, update_matrix) {
+    camera.position.x = camera_user_data.radius * Math.sin(camera_user_data.theta * DEG_TO_RAD_2) * Math.cos(camera_user_data.phi * DEG_TO_RAD_2);
+    camera.position.y = camera_user_data.radius * Math.sin(camera_user_data.phi * DEG_TO_RAD_2);
+    camera.position.z = camera_user_data.radius * Math.cos(camera_user_data.theta * DEG_TO_RAD_2) * Math.cos(camera_user_data.phi * DEG_TO_RAD_2);
+    if (update_matrix) {
+        camera.updateMatrix();
     }
 }
 
-function camera_calculate_distance(camera) {
-    return new THREE.Vector2(
-        camera.userData.distance_from_robot * Math.cos(camera.rotation.x),
-        camera.userData.distance_from_robot * Math.sin(camera.rotation.x)
-    );
-}
-
-function camera_calculate_position(camera, dist) {
-    var theta = camera.userData.robot.rotation.y + camera.userData.angle_around_robot;
-    var offsetX = dist.x * Math.sin(theta);
-    var offsetZ = dist.x * Math.cos(theta);
-    camera.position.set(
-        camera.userData.robot.position.x - offsetX,
-        camera.userData.robot.position.y + dist.y,
-        camera.userData.robot.position.z - offsetZ
-    );
+function camera_mouse_down(camera, x, y) {
+    camera_user_data.on_mousedown_theta = camera_user_data.theta;
+    camera_user_data.on_mousedown_phi = camera_user_data.phi;
+    camera_user_data.on_mousedown_x = x;
+    camera_user_data.on_mousedown_y = y;
 }
 
 function camera_zoom(camera, mouse_wheel_delta) {
-    var zoom_level = mouse_wheel_delta * MOUSE_SENSITIVITY.z;
-    camera.userData.distance_from_robot -= zoom_level;
+    let zoom_level = mouse_wheel_delta * MOUSE_SENSITIVITY.z;
+    camera_user_data.radius -= zoom_level;
+    camera_set_position(camera);
+    camera.lookAt(new THREE.Vector3(0, 0, 0));
+    camera.updateMatrix();
 }
 
-function camera_increase_pitch(camera, val, rad) {
-    var rx = val;
-    if (!rad) {
-        rx = THREE.Math.degToRad(rx);
-    }
-	camera_set_pitch(camera, camera.rotation.x + rx, true);
+function camera_update(camera) {
+    camera_set_position(camera);
+    camera.lookAt(new THREE.Vector3(0, 0, 0));
+    camera.updateMatrix();
 }
 
-function camera_increase_yaw(camera, val, rad) {
-    var ry = val;
-    if (!rad) {
-        ry = THREE.Math.degToRad(ry);
-    }
-	camera_set_yaw(camera, camera.rotation.y + ry, true);
-}
-
-function camera_increase_angle_around_robot(camera, val, rad) {
-    var rr = val;
-    if (!rad) {
-        rr = THREE.Math.degToRad(rr);
-    }
-    camera_set_angle_around_robot(camera, camera.userData.angle_around_robot + rr, true);
-}
-
-function camera_set_pitch(camera, val, rad) {
-    var angle = val;
-    if (!rad) {
-        angle = THREE.Math.degToRad(angle);
-    }
-    while (angle < 0)
-		angle += PI_2;
-	while (angle > PI_2)
-		angle -= PI_2;
-    camera.rotation.x = angle;
-}
-
-function camera_set_yaw(camera, val, rad) {
-    var angle = val;
-    if (!rad) {
-        angle = THREE.Math.degToRad(angle);
-    }
-    while (angle < 0)
-		angle += PI_2;
-	while (angle > PI_2)
-		angle -= PI_2;
-    camera.rotation.y = angle;
-}
-
-function camera_set_angle_around_robot(camera, val, rad) {
-    var angle = val;
-    if (!rad) {
-        angle = THREE.Math.degToRad(angle);
-    }
-    while (angle < 0)
-		angle += PI_2;
-	while (angle > PI_2)
-		angle -= PI_2;
-    camera.userData.angle_around_robot = angle;
-}
 
 function camera_move(camera, mouseinfo) {
-    camera_calculate_pitch(camera, mouseinfo);
-    camera_calculate_angle_around_robot(camera, mouseinfo);
-    var dist = camera_calculate_distance(camera);
-    camera_calculate_position(camera, dist);
-    camera_set_yaw(camera, Math.PI - (camera.userData.robot.rotation.y + camera.userData.angle_around_robot), true);
-    camera.updateMatrix();
+    if (mouseinfo.left_button_pressed) {
+        camera_user_data.theta = -((mouseinfo.current_mouse_position.x - camera_user_data.on_mousedown_x) * MOUSE_SENSITIVITY.x) + camera_user_data.on_mousedown_theta;
+        camera_user_data.phi = ((mouseinfo.current_mouse_position.y - camera_user_data.on_mousedown_y) * MOUSE_SENSITIVITY.y) + camera_user_data.on_mousedown_phi;
+        camera_user_data.phi = Math.min(180, Math.max(0, camera_user_data.phi));
+        camera_set_position(camera);
+        camera.lookAt(new THREE.Vector3(0, 0, 0));
+        camera.updateMatrix();
+    }
+}
+
+function camera_resize(camera, width, height) {
+    camera_user_data.left = width / - 2.0;
+	camera_user_data.right = width / 2.0;
+	camera_user_data.top = height / 2.0;
+	camera_user_data.bottom = height / -2.0;
+    camera_user_data.aspect = width / height;
+
+    if (camera_user_data.is_perspective) {
+        camera.aspect = camera_user_data.aspect;
+    } else {
+        camera.left = camera_user_data.left;
+        camera.right = camera_user_data.right;
+        camera.top = camera_user_data.top;
+        camera.bottom = camera_user_data.bottom;
+    }
+    camera.updateProjectionMatrix();
+}
+
+function camera_to_perspective() {
+    camera_user_data.is_perspective = true;
+    camera = new THREE.PerspectiveCamera(60, camera_user_data.aspect, 1, 10000);
+    camera_update(camera);
+    camera.updateProjectionMatrix();
+}
+
+function camera_to_ortho() {
+    camera_user_data.is_perspective = false;
+    camera = new THREE.OrthographicCamera(camera_user_data.left, camera_user_data.right, camera_user_data.top, camera_user_data.bottom, 1, 10000);
+    camera_update(camera);
+    camera.updateProjectionMatrix();
+}
+
+function camera_top(camera) {
+    camera_user_data.phi = 180;
+    camera_user_data.theta = 0;
+    camera_update(camera);
+}
+
+function camera_front(camera) {
+    camera_user_data.phi = 0;
+    camera_user_data.theta = 360;
+    camera_update(camera);
+}
+
+function camera_back(camera) {
+    camera_user_data.phi = 0;
+    camera_user_data.theta = 0;
+    camera_update(camera);
+}
+
+function camera_right(camera) {
+    camera_user_data.phi = 0;
+    camera_user_data.theta = 180;
+    camera_update(camera);
+}
+
+function camera_left(camera) {
+    camera_user_data.phi = 0;
+    camera_user_data.theta = -180;
+    camera_update(camera);
 }

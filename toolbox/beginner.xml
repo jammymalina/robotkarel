@@ -1,0 +1,33 @@
+<xml id="robot_toolbox_beginner" style="display: none">
+    <block type="run_block"></block>
+    <block type="wall_col_block"></block>
+    <block type="pit_col_block"></block>
+    <block type="remove_fail_block"></block>
+    <block type="turn_left"></block>
+    <block type="turn_right"></block>
+    <block type="move_forward"></block>
+    <block type="lay_tile"></block>
+    <block type="remove_tile"></block>
+
+    <block type="controls_if"></block>
+    <block type="logic_negate"></block>
+    <block type="logic_operation"></block>
+    <block type="is_wall"></block>
+    <block type="is_pit"></block>
+    <block type="is_tile"></block>
+
+    <block type="controls_whileUntil"></block>
+    <block type="controls_repeat_ext">
+        <value name="TIMES">
+            <block type="math_number">
+                <field name="NUM">4</field>
+            </block>
+        </value>
+    </block>
+    <block type="math_number">
+        <field name="NUM">4</field>
+    </block>
+
+    <block type="function_create"></block>
+    <block type="function_call"></block>
+</xml>

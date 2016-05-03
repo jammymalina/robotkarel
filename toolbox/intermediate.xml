@@ -1,0 +1,38 @@
+<xml id="robot_toolbox_intermediate" style="display: none">
+    <category name="Príkazy" colour="40">
+        <block type="run_block"></block>
+        <block type="turn_left"></block>
+        <block type="turn_right"></block>
+        <block type="move_forward"></block>
+        <block type="lay_tile"></block>
+        <block type="remove_tile"></block>
+    </category>
+    <category name="Vetvenie" colour="80">
+        <block type="controls_if"></block>
+        <block type="logic_boolean"></block>
+        <block type="logic_negate"></block>
+        <block type="is_wall"></block>
+        <block type="is_pit"></block>
+        <block type="is_tile"></block>
+    </category>
+    <category name="Cykly" colour="120">
+        <block type="controls_whileUntil"></block>
+        <block type="controls_repeat_ext">
+            <value name="TIMES">
+                <block type="math_number">
+                    <field name="NUM">4</field>
+                </block>
+            </value>
+        </block>
+        <block type="math_number">
+            <field name="NUM">4</field>
+        </block>
+    </category>
+    <category name="Matematika" colour="160">
+        <block type="math_number">
+            <field name="NUM">4</field>
+        </block>
+        <block type="math_arithmetic"></block>
+    </category>
+    <category name="Funkcie" custom="PROCEDURE"></category>
+</xml>

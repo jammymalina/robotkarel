@@ -2,14 +2,18 @@ function is_array(potential_array) {
     return potential_array.constructor === Array;
 }
 
+function parse(code) {
+    return acorn.parse(code);
+}
+
 class Interpreter {
     constructor(code, init_func) {
-        this.syntax_tree = Parser.parse(code);
+        this.syntax_tree = parse(code);
         this.paused = false;
         this.UNDEFINED = this.create_primitive(undefined);
         this._init_function = init_func;
-        let scope = this.create_scope();
-        this.state_stack = [{
+        let scope = this.create_scope(this.syntax_tree, null);
+        this.execution_stack = [{
             node: this.syntax_tree,
             scope: scope,
             this_expression: scope
@@ -17,11 +21,11 @@ class Interpreter {
     }
 
     step() {
-        if (!is_array(this.state_stack))
+        if (!is_array(this.execution_stack) || this.execution_stack.length <= 0)
             return false;
         else if (this.paused)
             return true;
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         if (this['step_' + state.node.type]) {
             this['step_' + state.node.type]();
         } else {
@@ -62,25 +66,25 @@ class Interpreter {
             num = num || self.UNDEFINED;
             return self.create_primitive(isNaN(num.toNumber()));
         };
-        self.set_property(scope, 'isNaN', this.create_native_function(wrapper));
+        self.set_property(scope, 'isNaN', this.to_basic_js_function(wrapper));
         // isFinite
         wrapper = function(num) {
             num = num || self.UNDEFINED;
             return self.create_primitive(isFinite(num.toNumber()));
         };
-        self.set_property(scope, 'isFinite', this.create_native_function(wrapper));
+        self.set_property(scope, 'isFinite', this.to_basic_js_function(wrapper));
         // parseFloat
         wrapper = function(str) {
             str = str || self.UNDEFINED;
             return self.create_primitive(parseFloat(str.toString()));
         };
-        self.set_property(scope, 'parseFloat', this.create_native_function(wrapper));
+        self.set_property(scope, 'parseFloat', this.to_basic_js_function(wrapper));
         // parseInt
         wrapper = function(str, radix) {
             str = str || self.UNDEFINED;
             return self.create_primitive(parseInt(str.toString(), radix.toNumber()));
         };
-        self.set_property(scope, 'parseInt', this.create_native_function(wrapper));
+        self.set_property(scope, 'parseInt', this.to_basic_js_function(wrapper));
         // length, eval
         let func = this.create_object(this.FUNCTION);
         func.eval = true;
@@ -116,8 +120,8 @@ class Interpreter {
             if (args.indexOf(')') != -1) {
                 throw new SyntaxError('Function argument string contains ")".');
             }
-            new_func.parent_scope = self.state_stack[self.state_stack.length - 1].scope;
-            let syntax_tree = Parser.parse('$ = function(' + args + ') {' + code + '};');
+            new_func.parent_scope = self.execution_stack[self.execution_stack.length - 1].scope;
+            let syntax_tree = parse('$ = function(' + args + ') {' + code + '};');
             new_func.node = syntax_tree.body[0].expression.right;
             self.set_property(newFunc, 'length', self.create_primitive(newFunc.node.length), true);
             return new_func;
@@ -150,13 +154,13 @@ class Interpreter {
         wrapper = function() {
             return self.create_primitive(this.toString());
         };
-        this.set_property(this.FUNCTION.properties.prototype, 'toString', this.create_native_function(wrapper), false, true);
-        this.set_property(this.FUNCTION, 'toString', this.create_native_function(wrapper), false, true);
+        this.set_property(this.FUNCTION.properties.prototype, 'toString', this.to_basic_js_function(wrapper), false, true);
+        this.set_property(this.FUNCTION, 'toString', this.to_basic_js_function(wrapper), false, true);
         wrapper = function() {
             return self.create_primitive(this.valueOf());
         };
-        this.set_property(this.FUNCTION.properties.prototype, 'valueOf', this.create_native_function(wrapper), false, true);
-        this.set_property(this.FUNCTION, 'valueOf', this.create_native_function(wrapper), false, true);
+        this.set_property(this.FUNCTION.properties.prototype, 'valueOf', this.to_basic_js_function(wrapper), false, true);
+        this.set_property(this.FUNCTION, 'valueOf', this.to_basic_js_function(wrapper), false, true);
     }
 
     init_global_object(scope) {
@@ -172,18 +176,18 @@ class Interpreter {
             }
             return new_obj;
         };
-        this.OBJECT = this.create_native_function(wrapper);
+        this.OBJECT = this.to_basic_js_function(wrapper);
         this.set_property(scope, 'Object', this.OBJECT);
 
         // toString, valueOf
         wrapper = function() {
             return self.create_primitive(this.toString());
         };
-        this.set_property(this.OBJECT.properties.prototype, 'toString', this.create_native_function(wrapper), false, true);
+        this.set_property(this.OBJECT.properties.prototype, 'toString', this.to_basic_js_function(wrapper), false, true);
         wrapper = function() {
             return self.create_primitive(this.valueOf());
         };
-        this.set_property(this.OBJECT.properties.prototype, 'valueOf', this.create_native_function(wrapper), false, true);
+        this.set_property(this.OBJECT.properties.prototype, 'valueOf', this.to_basic_js_function(wrapper), false, true);
         // hasOwnProperty
         wrapper = function(property) {
             for (let key in this.properties) {
@@ -192,7 +196,7 @@ class Interpreter {
             }
             return self.create_primitive(false);
         };
-        this.set_property(this.OBJECT.properties.prototype, 'hasOwnProperty', this.create_native_function(wrapper), false, true);
+        this.set_property(this.OBJECT.properties.prototype, 'hasOwnProperty', this.to_basic_js_function(wrapper), false, true);
         // keys
         wrapper = function(obj) {
             let list = self.create_object(self.ARRAY);
@@ -203,10 +207,10 @@ class Interpreter {
             }
             return list;
         };
-        this.set_property(this.OBJECT, 'keys', this.create_native_function(wrapper));
+        this.set_property(this.OBJECT, 'keys', this.to_basic_js_function(wrapper));
     }
 
-    init_number() {
+    init_number(scope) {
         let self = this;
         let wrapper;
         // constructor
@@ -227,7 +231,7 @@ class Interpreter {
                 return self.create_primitive(value);
             }
         };
-        this.NUMBER = this.create_native_function(wrapper);
+        this.NUMBER = this.to_basic_js_function(wrapper);
         this.set_property(scope, 'Number', this.NUMBER);
         // numerical constants
         let numerical_constants = ['MAX_VALUE', 'MIN_VALUE', 'NaN', 'NEGATIVE_INFINITY', 'POSITIVE_INFINITY'];
@@ -240,21 +244,21 @@ class Interpreter {
             let n = this.toNumber();
             return self.create_primitive(n.toExponential(x));
         };
-        this.set_property(this.NUMBER.properties.prototype, 'toExponential', this.create_native_function(wrapper), false, true);
+        this.set_property(this.NUMBER.properties.prototype, 'toExponential', this.to_basic_js_function(wrapper), false, true);
         // toPrecision
         wrapper = function(precision) {
             precision = precision ? precision.toNumber() : undefined;
             let n = this.toNumber();
             return self.create_primitive(n.toPrecision(precision));
         };
-        this.set_property(this.NUMBER.properties.prototype, 'toPrecision', this.create_native_function(wrapper), false, true);
+        this.set_property(this.NUMBER.properties.prototype, 'toPrecision', this.to_basic_js_function(wrapper), false, true);
         // toString
         wrapper = function(radix) {
             radix = radix ? radix.toNumber() : 10;
             let n = this.toNumber();
             return self.create_primitive(n.toString(radix));
         };
-        this.set_property(this.NUMBER.properties.prototype, 'toString', this.create_native_function(wrapper), false, true);
+        this.set_property(this.NUMBER.properties.prototype, 'toString', this.to_basic_js_function(wrapper), false, true);
     }
 
     init_boolean(scope) {
@@ -280,7 +284,7 @@ class Interpreter {
             }
             return self.create_primitive(value);
         };
-        this.BOOLEAN = this.create_native_function(wrapper);
+        this.BOOLEAN = this.to_basic_js_function(wrapper);
         this.set_property(scope, 'Boolean', this.BOOLEAN);
     }
 
@@ -309,7 +313,7 @@ class Interpreter {
                 return self.create_primitive(value);
             }
         };
-        this.STRING = this.create_native_function(wrapper);
+        this.STRING = this.to_basic_js_function(wrapper);
         this.set_property(scope, 'String', this.STRING);
         // charCodeAt
         wrapper = function(num) {
@@ -317,7 +321,7 @@ class Interpreter {
             num = (num || thisInterpreter.UNDEFINED).toNumber();
             return self.create_primitive(str.charCodeAt(num));
         };
-        this.set_property(this.STRING.properties.prototype, 'charCodeAt', this.create_native_function(wrapper), false, true);
+        this.set_property(this.STRING.properties.prototype, 'charCodeAt', this.to_basic_js_function(wrapper), false, true);
     }
 
     init_array(scope) {
@@ -352,7 +356,7 @@ class Interpreter {
             }
             return new_array;
         };
-        this.ARRAY = this.create_native_function(wrapper);
+        this.ARRAY = this.to_basic_js_function(wrapper);
         this.set_property(scope, 'Array', this.ARRAY);
         // pop
         wrapper = function() {
@@ -366,7 +370,7 @@ class Interpreter {
             }
             return value;
         };
-        this.set_property(this.ARRAY.properties.prototype, 'pop', this.create_native_function(wrapper), false, true);
+        this.set_property(this.ARRAY.properties.prototype, 'pop', this.to_basic_js_function(wrapper), false, true);
         // push
         wrapper = function(var_args) {
             for (let i = 0; i < arguments.length; i++) {
@@ -375,7 +379,7 @@ class Interpreter {
             }
             return self.create_primitive(this.length);
         };
-        this.set_property(this.ARRAY.properties.prototype, 'push', this.create_native_function(wrapper), false, true);
+        this.set_property(this.ARRAY.properties.prototype, 'push', this.to_basic_js_function(wrapper), false, true);
         // shift
         wrapper = function() {
             let value;
@@ -391,7 +395,7 @@ class Interpreter {
             }
             return value;
         };
-        this.set_property(this.ARRAY.properties.prototype, 'shift', this.create_native_function(wrapper), false, true);
+        this.set_property(this.ARRAY.properties.prototype, 'shift', this.to_basic_js_function(wrapper), false, true);
         // unshift
         wrapper = function(var_args) {
             for (let i = this.length - 1; i >= 0; i--) {
@@ -403,7 +407,7 @@ class Interpreter {
             }
             return self.create_primitive(this.length);
         };
-        this.set_property(this.ARRAY.properties.prototype, 'unshift', this.create_native_function(wrapper), false, true);
+        this.set_property(this.ARRAY.properties.prototype, 'unshift', this.to_basic_js_function(wrapper), false, true);
         // reverse
         wrapper = function() {
             for (let i = 0; i < this.length / 2; i++) {
@@ -413,7 +417,7 @@ class Interpreter {
             }
             return self.UNDEFINED;
         };
-        this.set_property(this.ARRAY.properties.prototype, 'reverse', this.create_native_function(wrapper), false, true);
+        this.set_property(this.ARRAY.properties.prototype, 'reverse', this.to_basic_js_function(wrapper), false, true);
         // splice
         wrapper = function(index, howmany, var_args) {
             index = get_int(index, 0);
@@ -434,7 +438,7 @@ class Interpreter {
             for (let i = index + howmany; i < this.length - howmany; i++) {
                 this.properties[i] = this.properties[i + howmany];
             }
-            // Delete superfluous properties.
+            // delete properties
             for (let i = this.length - howmany; i < this.length; i++) {
                 delete this.properties[i];
             }
@@ -449,7 +453,7 @@ class Interpreter {
             }
             return removed;
         };
-        this.set_property(this.ARRAY.properties.prototype, 'splice', this.create_native_function(wrapper), false, true);
+        this.set_property(this.ARRAY.properties.prototype, 'splice', this.to_basic_js_function(wrapper), false, true);
         // slice
         wrapper = function(start_arr, end_arr) {
             let list = self.create_object(self.ARRAY);
@@ -470,7 +474,7 @@ class Interpreter {
             }
             return list;
         };
-        this.set_property(this.ARRAY.properties.prototype, 'slice', this.create_native_function(wrapper), false, true);
+        this.set_property(this.ARRAY.properties.prototype, 'slice', this.to_basic_js_function(wrapper), false, true);
         // join
         wrapper = function(separator) {
             let sep;
@@ -485,7 +489,7 @@ class Interpreter {
             }
             return self.create_primitive(text.join(sep));
         };
-        this.set_property(this.ARRAY.properties.prototype, 'join', this.create_native_function(wrapper), false, true);
+        this.set_property(this.ARRAY.properties.prototype, 'join', this.to_basic_js_function(wrapper), false, true);
         // concat
         wrapper = function(var_args) {
             let list = self.create_object(self.ARRAY);
@@ -509,7 +513,7 @@ class Interpreter {
             }
             return list;
         };
-        this.set_property(this.ARRAY.properties.prototype, 'concat', this.create_native_function(wrapper), false, true);
+        this.set_property(this.ARRAY.properties.prototype, 'concat', this.to_basic_js_function(wrapper), false, true);
         // indexOf
         wrapper = function(search_element, from_index_arr) {
             search_element = search_element || self.UNDEFINED;
@@ -526,7 +530,7 @@ class Interpreter {
             }
             return self.create_primitive(-1);
         };
-        this.set_property(this.ARRAY.properties.prototype, 'indexOf', this.create_native_function(wrapper), false, true);
+        this.set_property(this.ARRAY.properties.prototype, 'indexOf', this.to_basic_js_function(wrapper), false, true);
         // last index of
         wrapper = function(search_element, from_index_arr) {
             search_element = search_element || self.UNDEFINED;
@@ -543,7 +547,7 @@ class Interpreter {
             }
             return self.create_primitive(-1);
         };
-        this.set_property(this.ARRAY.properties.prototype, 'lastIndexOf', this.create_native_function(wrapper), false, true);
+        this.set_property(this.ARRAY.properties.prototype, 'lastIndexOf', this.to_basic_js_function(wrapper), false, true);
         // sort
         wrapper = function(comp_func) {
             let list = [];
@@ -556,7 +560,7 @@ class Interpreter {
             }
             return this;
         };
-        this.set_property(this.ARRAY.properties.prototype, 'sort', this.create_native_function(wrapper), false, true);
+        this.set_property(this.ARRAY.properties.prototype, 'sort', this.to_basic_js_function(wrapper), false, true);
     }
 
     init_math(scope) {
@@ -581,7 +585,7 @@ class Interpreter {
                     return self.create_primitive(native_func.apply(Math, arguments));
                 };
             })(Math[num_functions[i]]);
-            this.set_property(math_obj, num_functions[i], this.create_native_function(wrapper));
+            this.set_property(math_obj, num_functions[i], this.to_basic_js_function(wrapper));
         }
 
     }
@@ -668,7 +672,7 @@ class Interpreter {
         return func;
     }
 
-    create_native_function(native_func) {
+    to_basic_js_function(native_func) {
         let func = this.create_object(this.FUNCTION);
         func.native_func = native_func;
         this.set_property(func, 'length', this.create_primitive(native_func.length), true);
@@ -676,7 +680,7 @@ class Interpreter {
     }
 
     is_instance_of(child, parent) {
-        if (!child && !parent) {
+        if (!child || !parent) {
             return false;
         } else if (child.parent == parent) {
             return true;
@@ -835,9 +839,9 @@ class Interpreter {
     }
 
     get_scope() {
-        for (let i = 0; i < this.state_stack.length; i++) {
-            if (this.state_stack[i].scope) {
-                return this.state_stack[i].scope;
+        for (let i = 0; i < this.execution_stack.length; i++) {
+            if (this.execution_stack[i].scope) {
+                return this.execution_stack[i].scope;
             }
         }
         throw new Error('No scope found.');
@@ -847,7 +851,7 @@ class Interpreter {
         let scope = this.create_object(null);
         scope.parent_scope = parent_scope;
         if (!parent_scope) {
-            this.init_global_scope();
+            this.init_global_scope(scope);
         }
         this.populate_scope(node, scope);
         scope.strict = false;
@@ -869,7 +873,7 @@ class Interpreter {
         name = name.toString();
         while (scope) {
             if (this.has_property(scope, name)) {
-                return this.set_property(scope, name, value);
+                return this.get_property(scope, name);
             }
             scope = scope.parent_scope;
         }
@@ -891,7 +895,7 @@ class Interpreter {
 
     populate_scope(node, scope) {
         if (node.type == 'VariableDeclaration') {
-            for (let i = 0; node.declarations.length; i++) {
+            for (let i = 0; i < node.declarations.length; i++) {
                 this.set_property(scope, node.declarations[i].id.name, this.UNDEFINED);
             }
         } else if (node.type == 'FunctionDeclaration') {
@@ -901,17 +905,22 @@ class Interpreter {
             return;
         }
         let self = this;
+
+        function recurse(child) {
+            if (child.constructor == self.syntax_tree.constructor) {
+                self.populate_scope(child, scope);
+            }
+        }
+
         for (let prop_name in node) {
             let prop = node[prop_name];
             if (prop && typeof prop == 'object') {
                 if (is_array(prop)) {
                     for (let i = 0; i < prop.length; i++) {
-                        if (prop[i].constructor == this.syntax_tree.constructor) {
-                            this.populate_scope(prop[i], scope);
-                        }
+                        recurse(prop[i]);
                     }
-                } else if (prop.constructor == this.syntax_tree.constructor) {
-                    this.populate_scope(scope, prop);
+                } else {
+                    recurse(prop);
                 }
             }
         }
@@ -939,7 +948,7 @@ class Interpreter {
 
     // node types
     step_ArrayExpression() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         let node = state.node;
         let n = state.n || 0;
         if (!state.array) {
@@ -949,33 +958,33 @@ class Interpreter {
         }
         if (node.elements[n]) {
             state.n = n + 1;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: node.elements[n]
             });
         } else {
             state.array.length = state.n || 0;
-            this.state_stack.shift();
-            this.state_stack[0].value = state.array;
+            this.execution_stack.shift();
+            this.execution_stack[0].value = state.array;
         }
     }
 
     step_AssignmentExpression() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         let node = state.node;
         if (!state.done_left) {
             state.done_left = true;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: node.left,
                 components: true
             });
         } else if (!state.done_right) {
             state.done_right = true;
             state.left_side = state.value;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: node.right
             });
         } else {
-            this.state_stack.shift();
+            this.execution_stack.shift();
             let left_side = state.left_side;
             let right_side = state.value;
             let value;
@@ -1011,25 +1020,26 @@ class Interpreter {
                 value = this.create_primitive(value);
             }
             this.set_value(left_side, value);
-            this.state_stack[0].value = value;
+            this.execution_stack[0].value = value;
         }
     }
 
     step_BinaryExpression() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         let node = state.node;
         if (!state.done_left) {
             state.done_left = true;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: node.left
             });
         } else if (!state.done_right) {
             state.done_right = true;
             state.left_side = state.value;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: node.right
             });
         } else {
+            this.execution_stack.shift();
             let left_side = state.left_side;
             let right_side = state.value;
             let comp_result = this.comp(left_side, right_side);
@@ -1090,28 +1100,28 @@ class Interpreter {
                     throw new Error('Unknown binary operator: ' + node.operator);
                 }
             }
-            this.state_stack[0].value = this.create_primitive(value);
+            this.execution_stack[0].value = this.create_primitive(value);
         }
     }
 
     step_DoWhileStatement() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         state.is_loop = true;
         if (state.node.type == 'DoWhileStatement' && state.test === undefined) {
-            state.value = this.createPrimitive(true);
+            state.value = this.create_primitive(true);
             state.test = true;
         }
         if (!state.test) {
             state.test = true;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: state.node.test
             });
         } else {
             state.test = false;
             if (!state.value.toBoolean()) {
-                this.state_stack.shift();
+                this.execution_stack.shift();
             } else if (state.node.body) {
-                this.state_stack.unshift({
+                this.execution_stack.unshift({
                     node: state.node.body
                 });
             }
@@ -1123,7 +1133,7 @@ class Interpreter {
     }
 
     step_ForStatement() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         state.is_loop = true;
         let node = state.node;
         let mode = state.mode || 0;
@@ -1131,7 +1141,7 @@ class Interpreter {
             case 0:
                 state.mode = 1;
                 if (node.init) {
-                    this.state_stack.unshift({
+                    this.execution_stack.unshift({
                         node: node.init
                     });
                 }
@@ -1139,7 +1149,7 @@ class Interpreter {
             case 1:
                 state.mode = 2;
                 if (node.test) {
-                    this.state_stack.unshift({
+                    this.execution_stack.unshift({
                         node: node.test
                     });
                 }
@@ -1147,9 +1157,9 @@ class Interpreter {
             case 2:
                 state.mode = 3;
                 if (state.value && !state.value.toBoolean()) {
-                    this.state_stack.shift();
+                    this.execution_stack.shift();
                 } else if (node.body) {
-                    this.state_stack.unshift({
+                    this.execution_stack.unshift({
                         node: node.body
                     });
                 }
@@ -1157,7 +1167,7 @@ class Interpreter {
             case 3:
                 state.mode = 1;
                 if (node.update) {
-                    this.state_stack.unshift({
+                    this.execution_stack.unshift({
                         node: node.update
                     });
                 }
@@ -1166,7 +1176,7 @@ class Interpreter {
     }
 
     step_ForInStatement() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         state.is_loop = true;
         let node = state.node;
         if (!state.done_variable) {
@@ -1175,14 +1185,14 @@ class Interpreter {
             if (left.type == 'VariableDeclaration') {
                 left = left.declarations[0].id;
             }
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: left,
                 components: true
             });
         } else if (!state.done_object) {
             state.done_object = true;
             state.variable = state.value;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: node.right
             });
         } else {
@@ -1209,11 +1219,11 @@ class Interpreter {
                 } while (state.object);
             state.iterator++;
             if (name === null) {
-                this.state_stack.shift();
+                this.execution_stack.shift();
             } else {
                 this.set_scope_value(state.variable, this.create_primitive(name));
                 if (node.body) {
-                    this.state_stack.unshift({
+                    this.execution_stack.unshift({
                         node: node.body
                     });
                 }
@@ -1222,52 +1232,52 @@ class Interpreter {
     }
 
     step_BreakStatement() {
-        let state = this.state_stack.shift();
+        let state = this.execution_stack.shift();
         let node = state.node;
         let label = null;
         if (node.label) {
             label = node.label.name;
         }
-        state = this.state_stack.shift();
+        state = this.execution_stack.shift();
         while (state && state.node.type != 'CallExpression') {
             if ((label && label == state.label) || (state.is_loop || state.is_switch)) {
                 return;
             }
-            state = this.state_stack.shift();
+            state = this.execution_stack.shift();
         }
         throw new Error('Faulty break statement.');
     }
 
     step_ContinueStatemet() {
-        let node = this.state_stack[0].node;
+        let node = this.execution_stack[0].node;
         let label = null;
         if (node.label) {
             label = node.label.name;
         }
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         while (state && state.node.type != 'CallExpression') {
             if (state.isLoop) {
                 if (!label || (label == state.label)) {
                     return;
                 }
             }
-            this.state_stack.shift();
-            state = this.state_stack[0];
+            this.execution_stack.shift();
+            state = this.execution_stack[0];
         }
         throw new Error('Faulty continue statement');
     }
 
     step_BlockStatement() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         let node = state.node;
         let n = state.n || 0;
         if (node.body[n]) {
             state.n = n + 1;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: node.body[n]
             });
         } else {
-            this.state_stack.shift();
+            this.execution_stack.shift();
         }
     }
 
@@ -1275,12 +1285,25 @@ class Interpreter {
         this.step_BlockStatement();
     }
 
+    step_ExpressionStatement() {
+        let state = this.execution_stack[0];
+        if (!state.done) {
+            state.done = true;
+            this.execution_stack.unshift({
+                node: state.node.expression
+            });
+        } else {
+            this.execution_stack.shift();
+            this.value = state.value;
+        }
+    }
+
     step_CallExpression() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         let node = state.node;
         if (!state.done_call_expression) {
             state.done_call_expression = true;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: node.callee,
                 components: true
             });
@@ -1302,7 +1325,7 @@ class Interpreter {
                 } else if (state.value.length) {
                     state.func_this = state.value[0];
                 } else {
-                    state.func_this = this.state_stack[this.state_stack.length - 1].this_expression;
+                    state.func_this = this.execution_stack[this.execution_stack.length - 1].this_expression;
                 }
                 state.arguments = [];
                 n = 0;
@@ -1314,7 +1337,7 @@ class Interpreter {
             }
             if (node.arguments[n]) {
                 state.n = n + 1;
-                this.state_stack.unshift({
+                this.execution_stack.unshift({
                     node: node.arguments[n]
                 });
             } else if (!state.done_exec) {
@@ -1341,7 +1364,7 @@ class Interpreter {
                     }
                     let args_list = this.create_object(this.ARRAY);
                     for (let i = 0; i < state.arguments.length; i++) {
-                        this.set_property(args_list, this.createPrimitive(i), state.arguments[i]);
+                        this.set_property(args_list, this.create_primitive(i), state.arguments[i]);
                     }
                     this.set_property(scope, 'arguments', args_list);
                     let func_state = {
@@ -1349,7 +1372,7 @@ class Interpreter {
                         scope: scope,
                         this_expression: state.func._this
                     };
-                    this.state_stack.unshift(func_state);
+                    this.execution_stack.unshift(func_state);
                     state.value = this.UNDEFINED;
                 } else if (state.func.native_func) {
                     state.value = state.func.native_func.apply(state.func_this, state.arguments);
@@ -1361,21 +1384,21 @@ class Interpreter {
                         state.value = code;
                     } else {
                         let eval_interpreter = new Interpreter(code.toString());
-                        eval_interpreter.state_stack[0].scope.parent_scope = this.get_scope();
+                        eval_interpreter.execution_stack[0].scope.parent_scope = this.get_scope();
                         state = {
                             node: {
                                 type: 'Eval',
                             },
                             interpreter: eval_interpreter
                         };
-                        this.state_stack.unshift(state);
+                        this.execution_stack.unshift(state);
                     }
                 } else {
                     throw new Error('Problem with a function interpretation.');
                 }
             } else {
-                this.state_stack.shift();
-                this.state_stack[0].value = state.is_constructor ? state.func_this : state.value;
+                this.execution_stack.shift();
+                this.execution_stack[0].value = state.is_constructor ? state.func_this : state.value;
             }
         }
     }
@@ -1384,47 +1407,117 @@ class Interpreter {
         this.step_CallExpression();
     }
 
+    step_UnaryExpression() {
+        let state = this.execution_stack[0];
+        let node = state.node;
+        if (!state.done) {
+            state.done = true;
+            let next_state = {
+                node: node.argument
+            };
+            if (node.operator == 'delete') {
+                next_state.components = true;
+            }
+            this.execution_stack.unshift(next_state);
+        } else {
+            this.execution_stack.shift();
+            let value;
+            if (node.operator == '-') {
+                value = -state.value.toNumber();
+            } else if (node.operator == '+') {
+                value = state.value.toNumber();
+            } else if (node.operator == '!') {
+                value = !state.value.toBoolean();
+            } else if (node.operator == '~') {
+                value = ~state.value.toNumber();
+            } else if (node.operator == 'typeof') {
+                value = state.value.type;
+            } else if (node.operator == 'delete') {
+                let obj, name;
+                if (state.value.length) {
+                    obj = state.value[0];
+                    name = state.value[1];
+                } else {
+                    obj = this.get_scope();
+                    name = state.value;
+                }
+                value = this.delete_property(obj, name);
+            } else if (node.operator == 'void') {
+                value = undefined;
+            } else {
+                throw new Error('Unknown unary operator: ' + node.operator);
+            }
+            this.execution_stack[0].value = this.create_primitive(value);
+        }
+    }
+
+    step_UpdateExpression() {
+        let state = this.execution_stack[0];
+        let node = state.node;
+        if (!state.done) {
+            state.done = true;
+            this.execution_stack.unshift({
+                node: node.argument,
+                components: true
+            });
+        } else {
+            this.execution_stack.shift();
+            let left_side = state.value;
+            let left_value = this.get_value(left_side).toNumber();
+            let value;
+            if (node.operator == '++') {
+                value = this.create_primitive(left_value + 1);
+            } else if (node.operator == '--') {
+                value = this.create_primitive(left_value - 1);
+            } else {
+                throw new Error('Unknown update expression: ' + node.operator);
+            }
+            this.set_value(left_side, value);
+            this.execution_stack[0].value = node.prefix ? value : this.create_primitive(left_value);
+        }
+    }
+
     step_ReturnStatement() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         let node = state.node;
         if (node.argument && !state.done) {
             state.done = true;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: node.argument
             });
         } else {
             let value = state.value || this.UNDEFINED;
             do {
-                this.state_stack.shift();
-                if (this.state_stack.length === 0) {
+                this.execution_stack.shift();
+                if (this.execution_stack.length === 0) {
                     throw new SyntaxError('Illegal return statement');
                 }
-                state = this.state_stack[0];
+                state = this.execution_stack[0];
             } while (state.node.type != 'CallExpression');
             state.value = value;
         }
     }
 
     step_SequenceExpression() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         let node = state.node;
         let n = state.n || 0;
         if (node.expressions[n]) {
             state.n = n + 1;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: node.expressions[n]
             });
         } else {
-            this.state_stack.shift();
-            this.state_stack[0].value = state.value;
+            this.execution_stack.shift();
+            this.execution_stack[0].value = state.value;
         }
     }
 
     step_ThisExpression() {
-        this.state_stack.shift();
-        for (var i = 0; i < this.state_stack.length; i++) {
-            if (this.state_stack[i].this_expression) {
-                this.state_stack[0].value = this.state_stack[i].this_expression;
+        this.execution_stack.shift();
+        for (var i = 0; i < this.execution_stack.length; i++) {
+            if (this.execution_stack[i].this_expression) {
+                this.execution_stack[0].value = this.execution_stack[i].this_expression;
                 return;
             }
         }
@@ -1432,29 +1525,29 @@ class Interpreter {
     }
 
     step_ConditionalExpression() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         if (!state.done) {
             if (!state.test) {
                 state.test = true;
-                this.state_stack.unshift({
+                this.execution_stack.unshift({
                     node: state.node.test
                 });
             } else {
                 state.done = true;
                 if (state.value.toBoolean() && state.node.consequent) {
-                    this.state_stack.unshift({
+                    this.execution_stack.unshift({
                         node: state.node.consequent
                     });
                 } else if (!state.value.toBoolean() && state.node.alternate) {
-                    this.state_stack.unshift({
+                    this.execution_stack.unshift({
                         node: state.node.alternate
                     });
                 }
             }
         } else {
-            this.state_stack.shift();
+            this.execution_stack.shift();
             if (state.node.type == 'ConditionalExpression') {
-                this.state_stack[0].value = state.value;
+                this.execution_stack[0].value = state.value;
             }
         }
     }
@@ -1463,95 +1556,169 @@ class Interpreter {
         this.step_ConditionalExpression();
     }
 
+    step_SwitchStatement() {
+        let state = this.execution_stack[0];
+        state.checked = state.checked || [];
+        state.is_switch = true;
+
+        if (!state.test) {
+            state.test = true;
+            this.execution_stack.unshift({
+                node: state.node.discriminant
+            });
+        } else {
+            if (!state.switch_value) {
+                state.switch_value = state.value;
+            }
+            let index = state.index || 0;
+            let current_case = state.node.cases[index];
+            if (current_case) {
+                if (!state.done && !state.checked[index] && current_case.test) {
+                    state.checked[index] = true;
+                    this.execution_stack.unshift({
+                        node: current_case.test
+                    });
+                } else {
+                    if (state.done || !current_case.test || this.comp(state.value, state.switch_value) === 0) {
+                        state.done = true;
+                        let n = state.n || 0;
+                        if (current_case.consequent[n]) {
+                            this.execution_stack.unshift({
+                                node: current_case.consequent[n]
+                            });
+                            state.n = n + 1;
+                            return;
+                        }
+                    }
+                    state.n = 0;
+                    state.index = index + 1;
+                }
+            } else {
+                this.execution_stack.shift();
+            }
+        }
+    }
+
     step_EmptyStatement() {
-        this.state_stack.shift();
+        this.execution_stack.shift();
+    }
+
+    step_VariableDeclaration() {
+        let state = this.execution_stack[0];
+        let node = state.node;
+        let n = state.n || 0;
+        if (node.declarations[n]) {
+            state.n = n + 1;
+            this.execution_stack.unshift({
+                node: node.declarations[n]
+            });
+        } else {
+            this.execution_stack.shift();
+        }
+    }
+
+    step_VariableDeclarator() {
+        let state = this.execution_stack[0];
+        let node = state.node;
+        if (node.init && !state.done) {
+            state.done = true;
+            this.execution_stack.unshift({
+                node: node.init
+            });
+        } else {
+            if (!this.has_property(this, node.id.name) || node.init) {
+                let value = node.init ? state.value : this.UNDEFINED;
+                this.set_value(this.create_primitive(node.id.name), value);
+            }
+            this.execution_stack.shift();
+        }
     }
 
     step_FunctionDeclaration() {
-        this.state_stack.shift();
+        this.execution_stack.shift();
     }
 
     step_FunctionExpression() {
-        let state = this.state_stack[0];
-        this.state_stack.shift();
-        this.state_stack[0].value = this.create_function(state.node);
+        let state = this.execution_stack[0];
+        this.execution_stack.shift();
+        this.execution_stack[0].value = this.create_function(state.node);
     }
 
     step_Identifier() {
-        let state = this.state_stack[0];
-        this.state_stack.shift();
+        let state = this.execution_stack[0];
+        this.execution_stack.shift();
         let name = this.create_primitive(state.node.name);
-        this.state_stack[0].value = state.components ? name : this.get_scope_value(name);
+        this.execution_stack[0].value = state.components ? name : this.get_scope_value(name);
     }
 
     step_LabeledStatement() {
-        let state = this.state_stack.shift();
-        this.state_stack.unshift({
+        let state = this.execution_stack.shift();
+        this.execution_stack.unshift({
             node: state.node.body,
             label: state.node.label.name
         });
     }
 
     step_Literal() {
-        let state = this.state_stack[0];
-        this.state_stack.shift();
-        this.state_stack[0].value = this.create_primitive(state.node.value);
+        let state = this.execution_stack[0];
+        this.execution_stack.shift();
+        this.execution_stack[0].value = this.create_primitive(state.node.value);
     }
 
     step_LogicalExpression() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         let node = state.node;
         if (node.operator != '&&' && node.operator != '||') {
             throw new Error('Unknown logical operator: ' + node.operator);
         }
         if (!state.done_left) {
             state.done_left = true;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: node.left
             });
         } else if (!state.done_right) {
             if ((node.operator == '&&' && !state.value.toBoolean()) || (node.operator == '||' && state.value.toBoolean())) {
-                this.state_stack.shift();
-                this.state_stack[0].value = state.value;
+                this.execution_stack.shift();
+                this.execution_stack[0].value = state.value;
             } else {
                 state.done_right = true;
-                this.state_stack.unshift({
+                this.execution_stack.unshift({
                     node: node.right
                 });
             }
         } else {
-            this.state_stack.shift();
-            this.state_stack[0].value = state.value;
+            this.execution_stack.shift();
+            this.execution_stack[0].value = state.value;
         }
     }
 
     step_MemberExpression() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         let node = state.node;
         if (!state.done_object) {
             state.done_object = true;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: node.object
             });
         } else if (!state.done_prop) {
             state.done_prop = true;
             state.object = state.value;
-            this.state_stack.unshift({
+            this.execution_stack.unshift({
                 node: node.property,
                 components: !node.computed
             });
         } else {
-            this.state_stack.shift();
+            this.execution_stack.shift();
             if (state.components) {
-                this.state_stack[0].value = [state.object, state.value];
+                this.execution_stack[0].value = [state.object, state.value];
             } else {
-                this.state_stack[0].value = this.get_property(state.object, state.value);
+                this.execution_stack[0].value = this.get_property(state.object, state.value);
             }
         }
     }
 
     step_ObjectExpression() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         let node = state.node;
         let value_t = state.value_t;
         let n = state.n || 0;
@@ -1567,27 +1734,27 @@ class Interpreter {
         if (node.properties[n]) {
             if (value_t) {
                 state.n = n + 1;
-                this.state_stack.unshift({
+                this.execution_stack.unshift({
                     node: node.properties[n].value
                 });
             } else {
-                this.state_stack.unshift({
+                this.execution_stack.unshift({
                     node: node.properties[n].key,
                     components: true
                 });
             }
             state.value_t = !value_t;
         } else {
-            this.state_stack.shift();
-            this.state_stack[0].value = state.object;
+            this.execution_stack.shift();
+            this.execution_stack[0].value = state.object;
         }
     }
 
     step_Eval() {
-        let state = this.state_stack[0];
+        let state = this.execution_stack[0];
         if (!state.interpreter.step()) {
-            this.state_stack.shift();
-            this.state_stack[0].value = state.interpreter.value || this.UNDEFINED;
+            this.execution_stack.shift();
+            this.execution_stack[0].value = state.interpreter.value || this.UNDEFINED;
         }
     }
 }
