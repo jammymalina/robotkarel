@@ -1,0 +1,22 @@
+{
+  "name": "robotkarel",
+  "version": "1.0.0",
+  "main": "index.js",
+  "author": "Jakub Jantosik",
+  "license": "MIT",
+  "scripts": {
+    "dev": "lite-server"
+  },
+  "dependencies": {
+    "redux": "^3.7.2"
+  },
+  "devDependencies": {
+    "awesome-typescript-loader": "^3.4.1",
+    "lite-server": "^2.3.0",
+    "raw-loader": "^0.5.1",
+    "source-map-loader": "^0.2.3",
+    "tslint": "^5.8.0",
+    "tslint-config-airbnb": "^5.4.2",
+    "typescript": "^2.6.2"
+  }
+}

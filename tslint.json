@@ -1,0 +1,10 @@
+{
+  "extends": [
+    "tslint-config-airbnb",
+    "tslint-react"
+  ],
+  "rules": {
+    "no-trailing-whitespace": true,
+    "indent": [true, "spaces", 2]  
+  }
+}

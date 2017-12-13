@@ -1,0 +1,18 @@
+<xml id="toolbox-categories" style="display: none">
+  <block type="event_whenflagclicked"></block>
+  <block type="control_repeat">
+    <value name="TIMES">
+      <shadow type="math_whole_number">
+        <field name="NUM">4</field>
+      </shadow>
+    </value>
+  </block>
+  <block type="control_forever"></block>
+  <block type="control_wait">
+    <value name="DURATION">
+      <shadow type="math_positive_number">
+        <field name="NUM">1</field>
+      </shadow>
+    </value>
+  </block>
+</xml>
