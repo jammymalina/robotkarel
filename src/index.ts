@@ -1,7 +1,11 @@
 import * as blocklyToolboxXml from './config/blockly/toolbox/basic.xml';
 
 window.addEventListener('load', (ev: Event) => {
-  console.log(blocklyToolboxXml);
+  const workspace = document.getElementById('workspace');
+  const blocklyWorkspace = document.getElementById('blocklyWorkspace');
+
+  let resizeTimer: number = null;
+  const RESIZE_DELAY_MS = 500;
 
   const options = {
     comments: true,
@@ -9,12 +13,8 @@ window.addEventListener('load', (ev: Event) => {
     media: './src/scratch-blocks/media/',
     oneBasedIndex: true,
     readOnly: false,
-    //rtl: false,
     scrollbars: true,
     trashcan: true,
-    //toolbox: null,
-    //horizontalLayout: false,
-    //toolboxPosition: 'start',
     zoom: {
       controls: true,
       wheel: true,
@@ -23,13 +23,34 @@ window.addEventListener('load', (ev: Event) => {
       minScale: 0.25,
       scaleSpeed: 1.1
     },
-    rtl: true,
+    rtl: false,
     toolbox: blocklyToolboxXml,
     horizontalLayout: true,
     toolboxPosition: 'start'
   };
 
-  console.log(Blockly);
+  const workspacePlayground = Blockly.inject(blocklyWorkspace, options);
 
-  Blockly.inject('blocklyWorkspace', options);
+  window.addEventListener('resize', (ev: UIEvent) => {
+    console.log('resize');
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      let element = workspace;
+      let x = 0;
+      let y = 0;
+      do {
+        x += element.offsetLeft;
+        y += element.offsetTop;
+        element = <HTMLElement> element.offsetParent;
+      } while (element);
+      blocklyWorkspace.style.left = x + 'px';
+      blocklyWorkspace.style.top = y + 'px';
+      blocklyWorkspace.style.width = workspace.offsetWidth + 'px';
+      blocklyWorkspace.style.height = workspace.offsetHeight + 'px';
+    }, RESIZE_DELAY_MS);
+  }, false);
+
+  window.dispatchEvent(new Event('resize'));
+
+  Blockly.svgResize(workspacePlayground);  
 });

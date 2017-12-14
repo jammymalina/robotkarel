@@ -5,15 +5,24 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="ie=edge">
+
+  <link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
+  <link href="dist/style.bundle.css" rel="stylesheet">  
+
   <title>Robot Karel</title>
 </head>
 
 <body>
   <script src="src/scratch-blocks/blockly_compressed_horizontal.js"></script>
   <script src="src/scratch-blocks/msg/messages.js"></script>
-  <script src="src/scratch-blocks/blocks/"></script>
+  <script src="src/scratch-blocks/blocks_horizontal/control.js"></script>
+  <script src="src/scratch-blocks/blocks_horizontal/event.js"></script>
+  <script src="src/scratch-blocks/blocks_common/math.js"></script>
+  <script src="src/scratch-blocks/blocks_common/colour.js"></script>  
   <script src="dist/bundle.js"></script>
-  <div id="blocklyWorkspace" style: "width: 500px; height: 100px;"></div>
+  <div id="workspace" class="workspace">
+    <div id="blocklyWorkspace"></div>
+  </div>
 </body>
 
 </html>
