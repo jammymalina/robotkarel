@@ -31,8 +31,9 @@ window.addEventListener('load', (ev: Event) => {
 
   const workspacePlayground = Blockly.inject(blocklyWorkspace, options);
 
+  console.log(Blockly);
+
   window.addEventListener('resize', (ev: UIEvent) => {
-    console.log('resize');
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       let element = workspace;
@@ -47,10 +48,10 @@ window.addEventListener('load', (ev: Event) => {
       blocklyWorkspace.style.top = y + 'px';
       blocklyWorkspace.style.width = workspace.offsetWidth + 'px';
       blocklyWorkspace.style.height = workspace.offsetHeight + 'px';
+      Blockly.svgResize(workspacePlayground);  
     }, RESIZE_DELAY_MS);
   }, false);
 
   window.dispatchEvent(new Event('resize'));
 
-  Blockly.svgResize(workspacePlayground);  
 });
