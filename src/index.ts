@@ -11,7 +11,7 @@ window.addEventListener('load', (ev: Event) => {
 
   const isWebglAvailable = !!gl;
 
-  console.log('WebGL2 available: ', isWebglAvailable);
+  console.log('WebGL2 available:', isWebglAvailable);
 
   let resizeTimer = 0;
   const RESIZE_DELAY_MS = 250;
