@@ -1,3 +1,20 @@
 {
-  
+  "comments": true,
+  "collapse": true,
+  "media": "./src/scratch-blocks/media/",
+  "oneBasedIndex": true,
+  "readOnly": false,
+  "scrollbars": true,
+  "trashcan": true,
+  "zoom": {
+    "controls": true,
+    "wheel": true,
+    "startScale": 1,
+    "maxScale": 4,
+    "minScale": 0.25,
+    "scaleSpeed": 1.1
+  },
+  "rtl": false,
+  "horizontalLayout": true,
+  "toolboxPosition": "start"
 }

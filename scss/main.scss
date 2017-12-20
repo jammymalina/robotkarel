@@ -1,5 +1,6 @@
 @import 'reset';
 @import 'variables';
+@import 'blockly';
 
 body {
   min-height: 100vh;
@@ -15,6 +16,11 @@ body {
   height: 100vh;
 }
 
-#blocklyWorkspace {
+.board {
+  display: block;
   position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
 }

@@ -1,0 +1,13 @@
+@import 'variables';
+
+#blocklyWorkspace {
+  position: absolute;
+}
+
+.blocklySvg {
+  background-color: transparent;
+}
+
+.blocklyFlyoutBackground {
+  fill: $blockly-toolbar-color;
+}

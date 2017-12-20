@@ -1,37 +1,31 @@
+import store from './store';
 import * as blocklyToolboxXml from './config/blockly/toolbox/basic.xml';
+import * as blocklyConfig from './config/blockly/config.json';
 
 window.addEventListener('load', (ev: Event) => {
   const workspace = document.getElementById('workspace');
   const blocklyWorkspace = document.getElementById('blocklyWorkspace');
+  const board = <HTMLCanvasElement> document.getElementById('board');
 
-  let resizeTimer: number = null;
-  const RESIZE_DELAY_MS = 500;
+  const gl = board.getContext('webgl2', { antialias: false });
+
+  const isWebglAvailable = !!gl;
+
+  console.log('WebGL2 available: ', isWebglAvailable);
+
+  let resizeTimer = 0;
+  const RESIZE_DELAY_MS = 250;
 
   const options = {
-    comments: true,
-    collapse: true,
-    media: './src/scratch-blocks/media/',
-    oneBasedIndex: true,
-    readOnly: false,
-    scrollbars: true,
-    trashcan: true,
-    zoom: {
-      controls: true,
-      wheel: true,
-      startScale: 1.0,
-      maxScale: 4,
-      minScale: 0.25,
-      scaleSpeed: 1.1
-    },
-    rtl: false,
-    toolbox: blocklyToolboxXml,
-    horizontalLayout: true,
-    toolboxPosition: 'start'
+    ...blocklyConfig,
+    toolbox: blocklyToolboxXml
   };
-
+  
   const workspacePlayground = Blockly.inject(blocklyWorkspace, options);
 
-  console.log(Blockly);
+  workspacePlayground.addChangeListener((ev: BlocklyEvent) => {
+    console.log(ev);
+  });
 
   window.addEventListener('resize', (ev: UIEvent) => {
     clearTimeout(resizeTimer);
@@ -48,10 +42,13 @@ window.addEventListener('load', (ev: Event) => {
       blocklyWorkspace.style.top = y + 'px';
       blocklyWorkspace.style.width = workspace.offsetWidth + 'px';
       blocklyWorkspace.style.height = workspace.offsetHeight + 'px';
-      Blockly.svgResize(workspacePlayground);  
+
+      board.width = window.innerWidth;
+      board.height = window.innerHeight;
+
+      Blockly.svgResize(workspacePlayground);
     }, RESIZE_DELAY_MS);
   }, false);
 
   window.dispatchEvent(new Event('resize'));
-
 });
